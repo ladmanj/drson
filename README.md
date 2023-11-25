@@ -21,7 +21,7 @@ Primarily created for extracting data from http://api.openweathermap.org but it'
         "temp_min":[8,8],
 ```
 
-Obviously you need to fill in your particular data at *{lat}* *{lon}* and *{appid}*, or plug in completely different site containing JSON data.
+Obviously you need to fill in your particular data at **{lat}** **{lon}** and **{appid}**, or plug in completely different site containing JSON data.
 The *"period"* key designes number of seconds between consecutive reads.
 Anything further is data to be parsed, then it's "name":[AR,RAY], where AR is number of bits of the output register/pair, RAY is fractional part if appropriate.
 If fractional part is 0, then the data will be parsed as signed integer up to decimal dot. If fractional part is non-zero, the number will be parsed as double and then converted to
