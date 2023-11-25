@@ -1,5 +1,5 @@
 {
-    "url":"http://api.openweathermap.org/data/2.5/forecast?lat=49.7882219&lon=14.4802158&appid=7a3908f634304f857b4b6923aa80916f&units=metric",
+    "url":http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={appid}&units=metric",
     "period":3600,
     "dt":[32,0],
     "main":
