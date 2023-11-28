@@ -21,13 +21,6 @@ enum {
     RTU
 };
 
-uint8_t mb_address = 1;
-uint16_t *mb_data = NULL;
-uint16_t mb_regs = 1000;
-
-
-char *url = NULL;
-uint32_t period = 3600;
 typedef struct data_selection data_selection_t;
 struct data_selection{
     char *name;
@@ -36,7 +29,18 @@ struct data_selection{
     data_selection_t *next;
 };
 
-data_selection_t base = {0};
+typedef struct {
+	uint16_t *data;
+	uint16_t  count;
+	data_selection_t **keys;
+} shared_regs;
+
+typedef struct {
+	char *url;
+	uint32_t period;
+    data_selection_t list;
+} cfg_struct;
+
 
 void free_structure(data_selection_t *s)
 {
@@ -78,11 +82,13 @@ static int jsoneq(const char *json, jsmntok_t *tok, const char *s) {
   return -1;
 }
 
-int extract(const char *js, jsmntok_t *t, size_t count) {
+int extract(const char *js, jsmntok_t *t, size_t count, void *data) {
   int i;
   int r = count;
 
-  if (mb_data == NULL) return EXIT_FAILURE;
+  shared_regs *mb = (shared_regs*)data;
+
+  if (mb->data == NULL) return EXIT_FAILURE;
   uint16_t index = 0;
 
       /* Assume the top-level element is an object */
@@ -93,30 +99,30 @@ int extract(const char *js, jsmntok_t *t, size_t count) {
 
   /* Loop over all keys of the root object */
   for (i = 1; i < r; i++) {
-  nextkey:  
-    data_selection_t **current = &(base.next);
-    while((*current)->next != NULL)
+  nextkey:;
+    data_selection_t **current = mb->keys;
+    while(*current != NULL)
     {
     
       if (jsoneq(js, &t[i], (*current)->name) == 0) {
-        uint32_t data = 0;
+        int64_t i_val = 0;
         if((*current)->frac_part_size)
         {
-          double value = strtod(js + t[++i].start, NULL);
-          value *= (double)(1 << (*current)->frac_part_size);
-          data = ((uint32_t)((int32_t)value + ((value < 0.0) ? -0.5 : 0.5)));
+          double d_val = strtod(js + t[++i].start, NULL);
+          d_val *= (double)(1 << (*current)->frac_part_size);
+          i_val = (int64_t)(d_val + ((d_val < 0.0) ? -0.5 : 0.5));
         }
         else
         {
-          data = (uint32_t)strtol(js + t[++i].start, NULL, 10);
+          i_val = strtol(js + t[++i].start, NULL, 10);
         }
 
-        if((*current)->intg_part_size + (*current)->frac_part_size > 16)
-            mb_data[index++] = (uint16_t)(data >> 16);
+        if(((*current)->intg_part_size + (*current)->frac_part_size) > 16)
+            mb->data[index++] = (uint16_t)(i_val >> 16);
 
-        mb_data[index++] = (uint16_t)data;
+        mb->data[index++] = (uint16_t)i_val;
 
-        if(index > 1000) return EXIT_FAILURE;
+        if(index > mb->count) return EXIT_FAILURE;
         goto nextkey;
       }
 
@@ -124,13 +130,17 @@ int extract(const char *js, jsmntok_t *t, size_t count) {
     }
 
   }
+  mb->count = index;
   return EXIT_SUCCESS;
 }
 
-int assign_values(const char *js, jsmntok_t *t, size_t count)
+int assign_values(const char *js, jsmntok_t *t, size_t count, void *data)
 {
   int i;
   int r = count;
+
+  cfg_struct *cfg = (cfg_struct *)data;
+  data_selection_t *list = &(cfg->list);
 
       /* Assume the top-level element is an object */
   if (r < 1 || t[0].type != JSMN_OBJECT) {
@@ -141,14 +151,14 @@ int assign_values(const char *js, jsmntok_t *t, size_t count)
   /* Loop over all keys of the root object */
   for (i = 1; i < r; i++) {
     if (jsoneq(js, &t[i], "url") == 0) {
-      url = strndup(js + t[i+1].start, t[i+1].end - t[i+1].start);
+      cfg->url = strndup(js + t[i+1].start, t[i+1].end - t[i+1].start);
       i++;
     } else if (jsoneq(js, &t[i], "period") == 0) {
-      period = strtol(js + t[i+1].start, NULL, 10);
+      cfg->period = strtol(js + t[i+1].start, NULL, 10);
       i++;
     } else if (t[i].type == JSMN_ARRAY)
     {
-      data_selection_t **add = &(base.next);
+      data_selection_t **add = &(list->next);
       while(*add != NULL)
       {
         add = &((*add)->next);
@@ -164,7 +174,7 @@ int assign_values(const char *js, jsmntok_t *t, size_t count)
 }
 
 
-int read_json( char *js, size_t jslen, int callback(const char *js, jsmntok_t *t, size_t count))
+int read_json( char *js, size_t jslen, void *cb_data, int callback(const char *js, jsmntok_t *t, size_t count, void *data))
 {
     jsmn_parser p;
     jsmntok_t *tok;
@@ -191,14 +201,14 @@ int read_json( char *js, size_t jslen, int callback(const char *js, jsmntok_t *t
             goto again;
         }
         } else {
-        callback(js, tok, p.toknext);
+        callback(js, tok, p.toknext, cb_data);
         }
     free(tok);
     return EXIT_SUCCESS;
 }
 
 
-int create_structure(FILE *config)
+int create_structure(FILE *config, cfg_struct *data)
 {
   int r;
   char *js = NULL;
@@ -223,8 +233,7 @@ int create_structure(FILE *config)
         strncpy(js + jslen, buf, r);
         jslen = jslen + r;
 
-        //        read_json(js,jslen,&dump);  // todo: change callback to something creating actual modbus register map
-        read_json(js,jslen,&assign_values);
+        read_json(js,jslen,(void *)data,&assign_values);
 
     }
 }
@@ -234,6 +243,9 @@ int main(int argc, char *argv[]) {
   pid_t process;
 
   int s = -1;
+
+  uint8_t mb_address = 1;
+
   modbus_t *ctx;
   modbus_mapping_t *mb_mapping;
   int rc;
@@ -256,19 +268,27 @@ int main(int argc, char *argv[]) {
       use_backend = TCP;
   }
 
-  FILE *config;
-  config = fopen("config.json","r");
-  create_structure(config);
-  fclose(config);
+  cfg_struct cfg_data = {.url = NULL, .period = 3600, .list = {0} };
 
-  if(url == NULL) return EXIT_FAILURE;
-  if(base.next == NULL) return EXIT_FAILURE;
+  FILE *cfg_file;
+  cfg_file = fopen("config.json","r");
+  create_structure(cfg_file,&cfg_data);
+  fclose(cfg_file);
+
+  if(cfg_data.url == NULL) return EXIT_FAILURE;
+  if(cfg_data.list.next == NULL) return EXIT_FAILURE;
 
   pthread_mutex_t mutex;
   pthread_mutex_init(&mutex,NULL);
 
-  mb_data = mmap(NULL,(mb_regs+10)*sizeof(uint16_t),PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
-  if(mb_data == NULL) return EXIT_FAILURE;
+
+  shared_regs mbr;
+
+  mbr.keys = &(cfg_data.list.next);
+  mbr.count = 2048;		//whole 4096 page will be allocated anyways
+
+  mbr.data = mmap(NULL,mbr.count*sizeof(uint16_t),PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+  if(mbr.data == NULL) return EXIT_FAILURE;
 
   process = fork();
   if(process < 0) return EXIT_FAILURE;
@@ -284,7 +304,7 @@ int main(int argc, char *argv[]) {
 
     curl_handle = curl_easy_init();
     if(curl_handle) {
-      curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+      curl_easy_setopt(curl_handle, CURLOPT_URL, cfg_data.url);
       curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
       curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
       curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
@@ -296,18 +316,18 @@ int main(int argc, char *argv[]) {
               fprintf(stderr, "error: %s\n", curl_easy_strerror(res));
             } else {
               while(pthread_mutex_trylock(&mutex)); // blocking while accessed by the fast process
-              read_json(chunk.memory,chunk.size,&extract);
+              read_json(chunk.memory,chunk.size,(void*)&mbr,&extract);
               pthread_mutex_unlock(&mutex);
               printf("Data successfuly fetched from JSON.\n");
             }
-            sleep(period);
+            sleep(cfg_data.period);
           }
 
           curl_easy_cleanup(curl_handle);
       }
       free(chunk.memory);
-      free(url);
-      free_structure(&base);
+      free(cfg_data.url);
+      free_structure(&(cfg_data.list));
 
     } else { // parent - the fast process
 
@@ -325,7 +345,7 @@ int main(int argc, char *argv[]) {
 
       modbus_set_debug(ctx, FALSE);
 
-      mb_mapping = modbus_mapping_new(0, 0, 0, mb_regs);
+      mb_mapping = modbus_mapping_new(0, 0, 0, mbr.count);
       if (mb_mapping == NULL) {
           fprintf(stderr, "Failed to allocate the mapping: %s\n",
                   modbus_strerror(errno));
@@ -362,7 +382,7 @@ int main(int argc, char *argv[]) {
           }
 
           if(0 == pthread_mutex_trylock(&mutex)) { // skipping while accessed by the slow process
-            memcpy(mb_mapping->tab_input_registers, mb_data, mb_regs * sizeof(uint16_t));
+            memcpy(mb_mapping->tab_input_registers, mbr.data, mbr.count * sizeof(uint16_t));
             pthread_mutex_unlock(&mutex);
           }
 
@@ -389,7 +409,7 @@ int main(int argc, char *argv[]) {
       wait(NULL);
   }
     
-  munmap(mb_data,(mb_regs+10)*sizeof(uint16_t)); 
+  munmap(mbr.data,mbr.count*sizeof(uint16_t));
   printf("Bye!\n");
   return EXIT_SUCCESS;
 }
