@@ -190,7 +190,6 @@ int read_json( char *js, size_t jslen, void *cb_data, int callback(const char *j
     }
 
     again:;
-    
     int r = jsmn_parse(&p, js, jslen, tok, tokcount);
         if (r < 0) {
         if (r == JSMN_ERROR_NOMEM) {
@@ -237,6 +236,7 @@ int create_structure(FILE *config, cfg_struct *data)
         read_json(js,jslen,(void *)data,&assign_values);
 
     }
+  return EXIT_SUCCESS;
 }
 
 int main(int argc, char *argv[]) {
