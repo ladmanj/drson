@@ -189,7 +189,8 @@ int read_json( char *js, size_t jslen, void *cb_data, int callback(const char *j
     return EXIT_FAILURE;
     }
 
-    again:
+    again:;
+    
     int r = jsmn_parse(&p, js, jslen, tok, tokcount);
         if (r < 0) {
         if (r == JSMN_ERROR_NOMEM) {
