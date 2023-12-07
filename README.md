@@ -11,7 +11,7 @@ Primarily created for extracting data from http://api.openweathermap.org but it'
 ### The configuration file looks like
 ```
 {
-    "url":http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={appid}&units=metric",
+    "url":"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={appid}&units=metric",
     "period":3600,
     "dt":[32,0],
     "main":
